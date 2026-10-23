@@ -1,0 +1,163 @@
+openapi: 3.0.3
+info:
+  title: Renewal Broker API
+  version: 1.0.0
+  description: |
+    Partner API for insurance brokers to look up policies, read renewal quotes and submit policies.
+    Every call is authenticated with the `X-API-Key` header issued to your brokerage, and only ever
+    sees your own policies. Errors use one JSON shape (see `Error`).
+servers:
+  - url: http://192.168.1.11:8081
+    description: Current server (switch to https and your public host for production)
+security:
+  - brokerApiKey: []
+tags:
+  - name: Broker Policies
+paths:
+  /api/broker/v1/policies:
+    get:
+      tags: [Broker Policies]
+      operationId: getPolicy
+      summary: Get a policy
+      description: Policy numbers contain slashes, so the number is passed as a query parameter.
+      parameters:
+        - $ref: '#/components/parameters/PolicyNo'
+      responses:
+        '200': { description: Policy found, content: { application/json: { schema: { $ref: '#/components/schemas/Policy' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Broker Policies]
+      operationId: createPolicy
+      summary: Submit a policy
+      description: The policy is attached to your brokerage automatically; brokerCode is not accepted in the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PolicyCreateRequest' }
+      responses:
+        '201': { description: Policy created, content: { application/json: { schema: { $ref: '#/components/schemas/Policy' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: Policy number already exists, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/broker/v1/policies/renewal-quote:
+    get:
+      tags: [Broker Policies]
+      operationId: getRenewalQuote
+      summary: Get the latest renewal quote for a policy
+      parameters:
+        - $ref: '#/components/parameters/PolicyNo'
+      responses:
+        '200': { description: Renewal quote, content: { application/json: { schema: { $ref: '#/components/schemas/RenewalQuote' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/broker/v1/renewals-due:
+    get:
+      tags: [Broker Policies]
+      operationId: listRenewalsDue
+      summary: List your active policies expiring in a date range
+      description: Max range 366 days, max page size 100. Sorted by expiry date.
+      parameters:
+        - { name: fromDate, in: query, required: true, description: 'Inclusive start, yyyy-MM-dd', schema: { type: string, format: date }, example: '2026-10-01' }
+        - { name: toDate, in: query, required: true, description: 'Inclusive end, yyyy-MM-dd', schema: { type: string, format: date }, example: '2026-10-31' }
+        - { name: page, in: query, schema: { type: integer, default: 0, minimum: 0 } }
+        - { name: size, in: query, schema: { type: integer, default: 50, minimum: 1, maximum: 100 } }
+      responses:
+        '200': { description: Page of renewals due, content: { application/json: { schema: { $ref: '#/components/schemas/RenewalDuePage' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+components:
+  securitySchemes:
+    brokerApiKey: { type: apiKey, in: header, name: X-API-Key, description: API key issued to your brokerage. }
+  parameters:
+    PolicyNo:
+      name: policyNo
+      in: query
+      required: true
+      schema: { type: string }
+      example: P11/2025/101/99999/99999/4000001
+  responses:
+    BadRequest: { description: Validation failed or invalid parameters, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Unauthorized: { description: Missing or invalid X-API-Key, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    NotFound: { description: Not found (or not yours), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  schemas:
+    Error:
+      type: object
+      properties:
+        timestamp: { type: string, format: date-time }
+        status: { type: integer }
+        error: { type: string }
+        message: { type: string }
+        path: { type: string }
+        fieldErrors: { type: object, additionalProperties: { type: string } }
+    Policy:
+      type: object
+      properties:
+        policyNo: { type: string, example: P11/2025/101/99999/99999/4000001 }
+        policyStatus: { type: string, enum: [ACTIVE, EXPIRED, LAPSED] }
+        productId: { type: integer }
+        productName: { type: string }
+        customerId: { type: string }
+        customerName: { type: string }
+        customerMobile: { type: string }
+        customerEmail: { type: string }
+        sumInsured: { type: number, example: 250000.00 }
+        premium: { type: number, description: Premium in local currency, example: 12500.00 }
+        currency: { type: string }
+        policyStartDate: { type: string, format: date }
+        policyExpiryDate: { type: string, format: date }
+        vehicleRegNo: { type: string }
+        brokerCode: { type: string, example: BRK001 }
+    PolicyCreateRequest:
+      type: object
+      required: [policyNo, productId, customerId, branchId, agentId, sumInsured, premium, policyStartDate, policyExpiryDate]
+      properties:
+        policyNo: { type: string, maxLength: 50 }
+        productId: { type: integer }
+        productName: { type: string }
+        customerId: { type: string }
+        customerName: { type: string }
+        customerMobile: { type: string }
+        customerEmail: { type: string, format: email }
+        branchId: { type: integer }
+        agentId: { type: integer }
+        sumInsured: { type: number, minimum: 0.01 }
+        premium: { type: number, minimum: 0.01 }
+        currency: { type: string }
+        policyStartDate: { type: string, format: date }
+        policyExpiryDate: { type: string, format: date }
+        vehicleRegNo: { type: string }
+        vehicleMfgDate: { type: string, format: date }
+        vehicleMfgCountry: { type: string }
+        driverDob: { type: string, format: date }
+    RenewalQuote:
+      type: object
+      properties:
+        policyNo: { type: string }
+        policyExpiryDate: { type: string, format: date }
+        expiringPremium: { type: number }
+        netLoadingDiscountPct: { type: number, description: Net loading (+) / discount (-) in percent }
+        renewalPremium: { type: number }
+        lossRatio: { type: number }
+        renewalStatus: { type: string, description: 'AUTO_RENEWAL_ELIGIBLE, REFERRAL_PENDING, REJECTED, RENEWED, BUSINESS_LOST' }
+        decisionDate: { type: string, format: date }
+    RenewalDue:
+      type: object
+      properties:
+        policyNo: { type: string }
+        customerName: { type: string }
+        productName: { type: string }
+        policyExpiryDate: { type: string, format: date }
+        daysToExpiry: { type: integer, format: int64 }
+        expiringPremium: { type: number }
+        renewalStatus: { type: string, nullable: true }
+        renewalPremium: { type: number, nullable: true }
+    RenewalDuePage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RenewalDue' } }
+        page: { type: integer }
+        size: { type: integer }
+        totalItems: { type: integer, format: int64 }
+        totalPages: { type: integer }
